@@ -464,16 +464,14 @@ class CalibreWebClient:
             raise ValueError(f"unsupported format {ext!r}; allowed: {', '.join(sorted(UPLOAD_FORMAT_MIME))}")
         if not path.is_file():
             raise FileNotFoundError(f"file not found: {path}")
-        fields = self._read_book_edit_form(book_id)
-        payload = _form_payload(fields, {})
         with path.open("rb") as fh:
             r = self._session_request(
                 "POST",
-                f"/admin/book/{book_id}",
-                data=payload,
+                "/upload",
+                data={"book_id": str(book_id)},
                 files=[("btn-upload-format", (path.name, fh, UPLOAD_FORMAT_MIME[ext]))],
             )
-        if r.status_code != 302:
+        if r.status_code not in (200, 302):
             raise CalibreWebError(f"upload_format failed: HTTP {r.status_code}")
 
     def set_shelf_public(self, shelf_id: int, public: bool) -> None:

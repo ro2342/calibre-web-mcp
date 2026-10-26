@@ -106,19 +106,25 @@ def test_update_book_metadata_rejects_bad_input_before_any_request(mock_cw):
     assert posts == []
 
 
-def test_upload_format_sends_file_and_full_form(mock_cw, tmp_path):
-    posts: list[httpx.Request] = []
+def test_upload_format_posts_file_to_upload_route(mock_cw, tmp_path):
+    uploads: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/upload":
+            uploads.append(req)
+            return httpx.Response(302, headers={"location": "/admin/book/7"})
+        return httpx.Response(404)
+
     f = tmp_path / "Book - Someone.epub"
     f.write_bytes(b"PK\x03\x04fake")
-    c = mock_cw(_edit_form_handler(posts))
+    c = mock_cw(handler)
     c.upload_format(7, f)
 
-    assert len(posts) == 1
-    raw = posts[0].content
+    assert len(uploads) == 1
+    raw = uploads[0].content
     assert b'name="btn-upload-format"; filename="Book - Someone.epub"' in raw
-    assert b'name="csrf_token"' in raw
-    assert b'name="title"' in raw
-    assert b"Old Title" in raw
+    assert b'name="book_id"' in raw
+    assert b"\r\n\r\n7\r\n" in raw
 
 
 def test_upload_format_rejects_unknown_extension_and_missing_file(mock_cw, tmp_path):
