@@ -17,11 +17,12 @@ Unlike existing Calibre MCP servers (which target the Calibre Content Server, `c
 - `get_book_details` — title, authors, tags, formats, presence of cover/description
 - `list_books_missing` — audit which books are missing a cover, description, or format
 
-**Writes (scoped to shelves only)**
+**Writes (shelves and read status)**
 - `create_shelf` — with optional `public=true`
 - `delete_shelf` — removes the shelf, not the books
 - `add_book_to_shelf` / `remove_book_from_shelf`
 - `set_shelf_public` — toggle visibility
+- `set_read_status` — mark a book as read or unread (no-op if already in that state)
 
 This server intentionally does **not** write metadata (use `calibredb` for that — it's lock-aware) and does **not** touch admin/user settings.
 

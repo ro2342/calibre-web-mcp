@@ -160,6 +160,16 @@ def remove_book_from_shelf(
 
 
 @mcp.tool
+def set_read_status(
+    book_id: Annotated[int, Field(description="Book id")],
+    read: Annotated[bool, Field(description="True to mark as read, False to mark as unread")],
+) -> dict:
+    """Mark a book as read or unread. No-op if it is already in that state."""
+    _get_client().set_read_status(book_id, read)
+    return {"book_id": book_id, "is_read": read}
+
+
+@mcp.tool
 def set_shelf_public(
     shelf_id: Annotated[int, Field(description="Shelf id")],
     public: Annotated[bool, Field(description="True to publish, False to make private")],

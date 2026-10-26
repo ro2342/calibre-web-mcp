@@ -307,6 +307,19 @@ class CalibreWebClient:
         if r.status_code not in (200, 204, 302):
             raise CalibreWebError(f"remove_book_from_shelf failed: HTTP {r.status_code}")
 
+    def set_read_status(self, book_id: int, read: bool) -> None:
+        r = self._session_request("GET", f"/book/{book_id}")
+        r.raise_for_status()
+        m = re.search(r'<input[^>]*id="have_read_cb"[^>]*>', r.text)
+        if not m:
+            raise CalibreWebError(f"read checkbox not found on /book/{book_id}")
+        currently_read = " checked" in m.group(0)
+        if currently_read == read:
+            return
+        r = self._session_request("POST", f"/ajax/toggleread/{book_id}")
+        if r.status_code not in (200, 204, 302):
+            raise CalibreWebError(f"set_read_status failed: HTTP {r.status_code}")
+
     def set_shelf_public(self, shelf_id: int, public: bool) -> None:
         r = self._session_request("GET", f"/shelf/edit/{shelf_id}")
         r.raise_for_status()

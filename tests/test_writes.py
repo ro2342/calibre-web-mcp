@@ -51,6 +51,28 @@ def test_delete_shelf_posts_with_csrf(mock_cw):
     assert captured == ["TEST_CSRF"]
 
 
+def test_set_read_status_toggles_only_when_state_differs(mock_cw):
+    toggles: list[str] = []
+    state = {"checked": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path == "/book/7":
+            chk = " checked" if state["checked"] else ""
+            return httpx.Response(
+                200, text=f'<input type="checkbox" id="have_read_cb" name="have_read_cb" value="on"{chk}>'
+            )
+        if req.method == "POST" and req.url.path == "/ajax/toggleread/7":
+            toggles.append(req.url.path)
+            state["checked"] = not state["checked"]
+            return httpx.Response(200, json={"result": "success"})
+        return httpx.Response(404)
+
+    c = mock_cw(handler)
+    c.set_read_status(7, True)
+    c.set_read_status(7, True)
+    assert toggles == ["/ajax/toggleread/7"]
+
+
 def test_add_book_to_shelf_sends_post(mock_cw):
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/shelf/add/5/100":
