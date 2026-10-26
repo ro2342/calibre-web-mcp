@@ -160,6 +160,35 @@ def remove_book_from_shelf(
 
 
 @mcp.tool
+def update_book_metadata(
+    book_id: Annotated[int, Field(description="Book id")],
+    title: Annotated[str | None, Field(description="New title; omit to keep")] = None,
+    authors: Annotated[list[str] | None, Field(description="Full author list; omit to keep")] = None,
+    series: Annotated[str | None, Field(description="Series name; empty string clears it; omit to keep")] = None,
+    series_index: Annotated[str | None, Field(description="Series number such as 1 or 2.5; omit to keep")] = None,
+    tags: Annotated[list[str] | None, Field(description="Full tag list; omit to keep")] = None,
+) -> dict:
+    """Edit title, authors, series, series index and/or tags of one book, keeping its id.
+
+    Only the fields you pass are changed; everything else on the book is sent back unchanged.
+    """
+    _get_client().update_book_metadata(
+        book_id, title=title, authors=authors, series=series, series_index=series_index, tags=tags
+    )
+    return {"book_id": book_id, "updated": True}
+
+
+@mcp.tool
+def upload_format(
+    book_id: Annotated[int, Field(description="Existing book id to attach the file to")],
+    file_path: Annotated[str, Field(description="Local path to an .epub, .kepub or .pdf file")],
+) -> dict:
+    """Attach a file as a new format of an existing book. Keeps the book id."""
+    _get_client().upload_format(book_id, file_path)
+    return {"book_id": book_id, "file": file_path, "uploaded": True}
+
+
+@mcp.tool
 def set_read_status(
     book_id: Annotated[int, Field(description="Book id")],
     read: Annotated[bool, Field(description="True to mark as read, False to mark as unread")],

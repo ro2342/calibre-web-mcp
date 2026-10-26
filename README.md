@@ -23,6 +23,8 @@ Unlike existing Calibre MCP servers (which target the Calibre Content Server, `c
 - `add_book_to_shelf` / `remove_book_from_shelf`
 - `set_shelf_public` — toggle visibility
 - `set_read_status` — mark a book as read or unread (no-op if already in that state)
+- `update_book_metadata` — edit title, authors, series, series index and/or tags, keeping the book id
+- `upload_format` — attach a local .epub/.kepub/.pdf file to an existing book
 
 This server intentionally does **not** write metadata (use `calibredb` for that — it's lock-aware) and does **not** touch admin/user settings.
 

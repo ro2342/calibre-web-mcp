@@ -1,0 +1,21 @@
+<!-- Hand-written fixture: field names copied from calibre-web cps/themes/standard/templates/book_edit.html -->
+<form action="/admin/book/7" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="FORM_CSRF">
+  <input type="text" name="book_id" value="7">
+  <input type="text" name="title" value="Old Title">
+  <input type="text" name="authors" value="Ada Lovelace &amp; Alan Turing">
+  <input type="text" name="publisher" value="Pub House">
+  <input type="text" name="pubdate" value="2020-01-01">
+  <input type="text" name="languages" value="eng">
+  <input type="text" name="tags" value="drama,fiction">
+  <input type="text" name="series" value="Saga">
+  <input type="text" name="series_index" value="1.0">
+  <input type="text" name="cover_url" value="">
+  <input type="checkbox" name="detail_view">
+  <select name="rating">
+    <option value="0">no rating</option>
+    <option value="8" selected>4 stars</option>
+  </select>
+  <textarea name="comments">Some &lt;b&gt;comment&lt;/b&gt;</textarea>
+  <input id="btn-upload-format" name="btn-upload-format" type="file" multiple>
+</form>

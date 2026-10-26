@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -20,6 +22,95 @@ OPDS_NS = {
     "dc": "http://purl.org/dc/terms/",
     "dcterms": "http://purl.org/dc/terms/",
 }
+
+EDIT_FORM_REQUIRED_FIELDS = (
+    "csrf_token",
+    "title",
+    "authors",
+    "tags",
+    "series",
+    "series_index",
+    "publisher",
+    "comments",
+    "languages",
+    "rating",
+    "pubdate",
+)
+
+UPLOAD_FORMAT_MIME = {
+    ".epub": "application/epub+zip",
+    ".kepub": "application/epub+zip",
+    ".pdf": "application/pdf",
+}
+
+
+class _EditFormParser(HTMLParser):
+    """Collects (name, value) pairs from a Calibre-Web edit form, in page order."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.fields: list[tuple[str, str]] = []
+        self._textarea: str | None = None
+        self._textarea_text: list[str] = []
+        self._select: str | None = None
+        self._select_selected: str | None = None
+        self._select_first: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k: (v or "") for k, v in attrs}
+        name = a.get("name")
+        if tag == "input" and name:
+            itype = a.get("type", "text").lower()
+            if itype in ("file", "submit", "button", "image", "reset"):
+                return
+            if itype in ("checkbox", "radio"):
+                if any(k == "checked" for k, _ in attrs):
+                    self.fields.append((name, a.get("value") or "on"))
+                return
+            self.fields.append((name, a.get("value", "")))
+        elif tag == "textarea" and name:
+            self._textarea = name
+            self._textarea_text = []
+        elif tag == "select" and name:
+            self._select = name
+            self._select_selected = None
+            self._select_first = None
+        elif tag == "option" and self._select is not None:
+            value = a.get("value", "")
+            if self._select_first is None:
+                self._select_first = value
+            if any(k == "selected" for k, _ in attrs) and self._select_selected is None:
+                self._select_selected = value
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "textarea" and self._textarea is not None:
+            self.fields.append((self._textarea, "".join(self._textarea_text)))
+            self._textarea = None
+        elif tag == "select" and self._select is not None:
+            chosen = self._select_selected if self._select_selected is not None else self._select_first
+            if chosen is not None:
+                self.fields.append((self._select, chosen))
+            self._select = None
+
+    def handle_data(self, data: str) -> None:
+        if self._textarea is not None:
+            self._textarea_text.append(data)
+
+
+def _form_payload(fields: list[tuple[str, str]], overrides: dict[str, str]) -> dict[str, Any]:
+    """Build the POST body from the page's fields, replacing only the keys in `overrides`."""
+    payload: dict[str, Any] = {}
+    applied: set[str] = set()
+    for name, value in fields:
+        if name in overrides and name not in applied:
+            value = overrides[name]
+            applied.add(name)
+        if name in payload:
+            prev = payload[name]
+            payload[name] = (prev if isinstance(prev, list) else [prev]) + [value]
+        else:
+            payload[name] = value
+    return payload
 
 
 class CalibreWebError(Exception):
@@ -103,10 +194,7 @@ class CalibreWebClient:
         if r.status_code == 302 and "/login" not in r.headers.get("location", ""):
             self._session_authed = True
             return
-        if "session" in self._client.cookies:
-            self._session_authed = True
-            return
-        raise AuthError(f"Login failed (HTTP {r.status_code})")
+        raise AuthError(f"Login failed (HTTP {r.status_code}): check CALIBRE_WEB_USER and CALIBRE_WEB_PASS")
 
     def _refresh_csrf(self) -> str:
         """Grab a fresh CSRF token. /me always has a form; / does not."""
@@ -319,6 +407,74 @@ class CalibreWebClient:
         r = self._session_request("POST", f"/ajax/toggleread/{book_id}")
         if r.status_code not in (200, 204, 302):
             raise CalibreWebError(f"set_read_status failed: HTTP {r.status_code}")
+
+    def _read_book_edit_form(self, book_id: int) -> list[tuple[str, str]]:
+        r = self._session_request("GET", f"/admin/book/{book_id}")
+        r.raise_for_status()
+        parser = _EditFormParser()
+        parser.feed(r.text)
+        names = {name for name, _ in parser.fields}
+        missing = [f for f in EDIT_FORM_REQUIRED_FIELDS if f not in names]
+        if missing:
+            raise CalibreWebError(
+                f"edit form for book {book_id} is missing expected fields: {', '.join(missing)}; refusing to edit"
+            )
+        return parser.fields
+
+    def update_book_metadata(
+        self,
+        book_id: int,
+        *,
+        title: str | None = None,
+        authors: list[str] | None = None,
+        series: str | None = None,
+        series_index: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        overrides: dict[str, str] = {}
+        if title is not None:
+            if not title.strip():
+                raise ValueError("title must not be empty")
+            overrides["title"] = title.strip()
+        if authors is not None:
+            if not authors or any(not a.strip() or "&" in a for a in authors):
+                raise ValueError("authors must be non-empty names without '&'")
+            overrides["authors"] = " & ".join(a.strip() for a in authors)
+        if series is not None:
+            overrides["series"] = series.strip()
+        if series_index is not None:
+            if not re.fullmatch(r"\d+(\.\d+)?", series_index.strip()):
+                raise ValueError("series_index must be a number such as 1 or 2.5")
+            overrides["series_index"] = series_index.strip()
+        if tags is not None:
+            if any("," in t for t in tags):
+                raise ValueError("tags must not contain commas")
+            overrides["tags"] = ",".join(t.strip() for t in tags if t.strip())
+        if not overrides:
+            return
+        fields = self._read_book_edit_form(book_id)
+        r = self._session_request("POST", f"/admin/book/{book_id}", data=_form_payload(fields, overrides))
+        if r.status_code != 302:
+            raise CalibreWebError(f"update_book_metadata failed: HTTP {r.status_code}")
+
+    def upload_format(self, book_id: int, file_path: str | Path) -> None:
+        path = Path(file_path)
+        ext = path.suffix.lower()
+        if ext not in UPLOAD_FORMAT_MIME:
+            raise ValueError(f"unsupported format {ext!r}; allowed: {', '.join(sorted(UPLOAD_FORMAT_MIME))}")
+        if not path.is_file():
+            raise FileNotFoundError(f"file not found: {path}")
+        fields = self._read_book_edit_form(book_id)
+        payload = _form_payload(fields, {})
+        with path.open("rb") as fh:
+            r = self._session_request(
+                "POST",
+                f"/admin/book/{book_id}",
+                data=payload,
+                files=[("btn-upload-format", (path.name, fh, UPLOAD_FORMAT_MIME[ext]))],
+            )
+        if r.status_code != 302:
+            raise CalibreWebError(f"upload_format failed: HTTP {r.status_code}")
 
     def set_shelf_public(self, shelf_id: int, public: bool) -> None:
         r = self._session_request("GET", f"/shelf/edit/{shelf_id}")

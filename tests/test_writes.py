@@ -51,6 +51,88 @@ def test_delete_shelf_posts_with_csrf(mock_cw):
     assert captured == ["TEST_CSRF"]
 
 
+def _edit_form_handler(post_log: list, fixture_html: str | None = None):
+    html = fixture_html if fixture_html is not None else fixture("book_edit_form.html")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path == "/admin/book/7":
+            return httpx.Response(200, text=html)
+        if req.method == "POST" and req.url.path == "/admin/book/7":
+            post_log.append(req)
+            return httpx.Response(302, headers={"location": "/book/7"})
+        return httpx.Response(404)
+
+    return handler
+
+
+def test_update_book_metadata_changes_only_passed_fields(mock_cw):
+    from urllib.parse import parse_qs
+
+    posts: list[httpx.Request] = []
+    c = mock_cw(_edit_form_handler(posts))
+    c.update_book_metadata(7, title="New Title", tags=["x", "y"])
+
+    assert len(posts) == 1
+    body = parse_qs(posts[0].content.decode(), keep_blank_values=True)
+    assert body["title"] == ["New Title"]
+    assert body["tags"] == ["x,y"]
+    assert body["authors"] == ["Ada Lovelace & Alan Turing"]
+    assert body["series"] == ["Saga"]
+    assert body["series_index"] == ["1.0"]
+    assert body["publisher"] == ["Pub House"]
+    assert body["comments"] == ["Some <b>comment</b>"]
+    assert body["rating"] == ["8"]
+    assert body["csrf_token"] == ["FORM_CSRF"]
+
+
+def test_update_book_metadata_refuses_when_expected_field_missing(mock_cw):
+    posts: list[httpx.Request] = []
+    html = fixture("book_edit_form.html").replace('name="tags"', 'name="tagz"')
+    c = mock_cw(_edit_form_handler(posts, html))
+    with pytest.raises(CalibreWebError, match="tags"):
+        c.update_book_metadata(7, title="Nope")
+    assert posts == []
+
+
+def test_update_book_metadata_rejects_bad_input_before_any_request(mock_cw):
+    posts: list[httpx.Request] = []
+    c = mock_cw(_edit_form_handler(posts))
+    with pytest.raises(ValueError):
+        c.update_book_metadata(7, series_index="abc")
+    with pytest.raises(ValueError):
+        c.update_book_metadata(7, tags=["a,b"])
+    with pytest.raises(ValueError):
+        c.update_book_metadata(7, authors=["A & B"])
+    assert posts == []
+
+
+def test_upload_format_sends_file_and_full_form(mock_cw, tmp_path):
+    posts: list[httpx.Request] = []
+    f = tmp_path / "Book - Someone.epub"
+    f.write_bytes(b"PK\x03\x04fake")
+    c = mock_cw(_edit_form_handler(posts))
+    c.upload_format(7, f)
+
+    assert len(posts) == 1
+    raw = posts[0].content
+    assert b'name="btn-upload-format"; filename="Book - Someone.epub"' in raw
+    assert b'name="csrf_token"' in raw
+    assert b'name="title"' in raw
+    assert b"Old Title" in raw
+
+
+def test_upload_format_rejects_unknown_extension_and_missing_file(mock_cw, tmp_path):
+    posts: list[httpx.Request] = []
+    c = mock_cw(_edit_form_handler(posts))
+    bad = tmp_path / "notes.txt"
+    bad.write_text("x")
+    with pytest.raises(ValueError):
+        c.upload_format(7, bad)
+    with pytest.raises(FileNotFoundError):
+        c.upload_format(7, tmp_path / "missing.epub")
+    assert posts == []
+
+
 def test_set_read_status_toggles_only_when_state_differs(mock_cw):
     toggles: list[str] = []
     state = {"checked": False}

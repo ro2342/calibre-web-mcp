@@ -38,6 +38,25 @@ def test_login_success_sets_session_authed():
     assert c._session_authed is True
 
 
+def test_login_failure_with_session_cookie_still_raises():
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path == "/login":
+            return httpx.Response(200, text=fixture("login_page.html"))
+        if req.method == "POST" and req.url.path == "/login":
+            return httpx.Response(200, text="bad credentials", headers={"set-cookie": "session=anon; Path=/"})
+        return httpx.Response(404)
+
+    c = CalibreWebClient("http://cw.test", "alice", "wrong")
+    c._client.close()
+    c._client = httpx.Client(
+        base_url="http://cw.test",
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
+    with pytest.raises(AuthError):
+        c.login()
+
+
 def test_login_failure_raises_autherror():
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and req.url.path == "/login":
